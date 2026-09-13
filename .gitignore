@@ -161,6 +161,7 @@ add files/notes
 eda.ipynb
 streamlit_app_zalozenia.md
 backups/
+docs/
 
 # Analiza wrażliwości parametrów - jednorazowy eksperyment, nie na stałe w repo
 sensitivity_analysis/
