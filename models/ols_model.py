@@ -135,12 +135,13 @@ class OLSModel:
 
     def _backward_elimination(self, X: pd.DataFrame, y: pd.Series):
         """Iteracyjnie usuwa cechę z najwyższym p-value, dopóki wszystkie
-        pozostałe są istotne (p <= ols_p_value_threshold) albo zostanie jedna."""
+        pozostałe są istotne (p <= ols_p_value_threshold) albo zostanie jedna.
+        P-value z błędów standardowych HAC (patrz _fit_hac)."""
         p_value_threshold = self.config["ols_p_value_threshold"]
         features = list(X.columns)
         while True:
             X_with_const = sm.add_constant(X[features])
-            model = sm.OLS(y, X_with_const).fit()
+            model = _fit_hac(y, X_with_const)
             p_values = model.pvalues.drop("const")
             worst_feature = p_values.idxmax()
             worst_p = p_values.max()
@@ -170,7 +171,7 @@ class OLSModel:
             features.remove(worst_feature)
 
         X_with_const = sm.add_constant(X[features])
-        model = sm.OLS(y, X_with_const).fit()
+        model = _fit_hac(y, X_with_const)
         return model, features
 
     def _compute_shap(self, x_row: pd.DataFrame, last_actual_y_level: float) -> dict:
@@ -191,3 +192,15 @@ class OLSModel:
             feature: float(value) * last_actual_y_level
             for feature, value in zip(self.selected_features, raw_shap_values)
         }
+
+
+def _fit_hac(y: pd.Series, X_with_const: pd.DataFrame):
+    """OLS z błędami standardowymi HAC (Newey-West). Współczynniki identyczne
+    jak w zwykłym OLS - zmieniają się tylko błędy standardowe i p-value.
+    Zwykły wzór zakłada stałą wariancję reszt i brak ich autokorelacji, a
+    dzienne zwroty mają skupiska zmienności (spokojne i nerwowe okresy), więc
+    zwykłe p-value są zaniżone i eliminacja wsteczna zostawiałaby cechy
+    dopasowane do szumu. Liczba opóźnień wg reguły Neweya-Westa:
+    floor(4 * (T/100)^(2/9)), dla ~3 lat danych = 6."""
+    maxlags = int(np.floor(4 * (len(y) / 100) ** (2 / 9)))
+    return sm.OLS(y, X_with_const).fit(cov_type="HAC", cov_kwds={"maxlags": maxlags})
