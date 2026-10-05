@@ -1,3 +1,5 @@
+import time
+
 import pandas as pd
 import yfinance as yf
 
@@ -87,6 +89,66 @@ def normalize_market_data(df_raw: pd.DataFrame) -> pd.DataFrame:
     return df_raw[df_raw.index.dayofweek < 5]
 
 
+# Okno pobierania wokół as_of_date (dni kalendarzowe wstecz). Celowo szersze
+# niż 1-2 dni: "period" w yfinance liczy się od chwili uruchomienia, a nie od
+# as_of_date, i dla krypto (notowanych 7 dni w tygodniu) oznacza inne dni niż
+# dla giełd - przy uruchomieniu ~2h po północy UTC (opóźnienia harmonogramu
+# GitHub Actions) krypto wypadało z okna w każdym dniu działania na żywo.
+# Jawne start/end daje ten sam wynik niezależnie od godziny uruchomienia.
+DOWNLOAD_WINDOW_DAYS = 7
+
+# Ile razy ponowić pobranie instrumentów, które przy zbiorczym zapytaniu nie
+# wróciły (Yahoo przy dużym zapytaniu potrafi pominąć część tickerów - w
+# okresie na żywo zdarzyło się to dla 13 akcji/ETF naraz). Brak po wszystkich
+# próbach jest zapisywany jako null - to często prawdziwy brak notowania
+# (np. święto na giełdzie w Tokio), a nie błąd.
+MAX_RETRIES = 2
+RETRY_DELAY_SECONDS = 3
+
+
+def _download_close(symbols: list[str], as_of_date: pd.Timestamp) -> pd.DataFrame:
+    start = (as_of_date - pd.Timedelta(days=DOWNLOAD_WINDOW_DAYS)).strftime("%Y-%m-%d")
+    end = (as_of_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")  # end jest wyłączny
+    df_raw = yf.download(symbols, start=start, end=end, interval="1d", progress=False)["Close"]
+    return normalize_market_data(df_raw)
+
+
+def fetch_market_row(as_of_date: pd.Timestamp) -> dict | None:
+    """
+    Zwraca {klucz_instrumentu: cena zamknięcia albo None} za as_of_date albo
+    None, jeśli dla tej daty nie ma jeszcze żadnych danych. Instrumenty bez
+    wartości są pobierane ponownie pojedynczo (do MAX_RETRIES razy). Bez
+    zapisu do bazy - używane przez save_latest_market_data().
+    """
+    df = _download_close(list(tickers.values()), as_of_date)
+
+    # Nie szukamy "ostatniego dostępnego dnia" - interesuje nas WYŁĄCZNIE
+    # dzisiejsza data (wg czasu rynku złota). Jeśli jej nie ma w indeksie,
+    # nie zapisujemy niczego - to nie jest "dzisiejszy" rekord.
+    if as_of_date not in df.index:
+        return None
+
+    row = {k: df.at[as_of_date, k] if k in df.columns else None for k in tickers}
+    missing = [k for k, v in row.items() if v is None or pd.isna(v)]
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        if not missing:
+            break
+        print(f"Próba {attempt + 1}/{MAX_RETRIES + 1}: ponowne pobranie {len(missing)} instrumentów bez wartości: {missing}")
+        time.sleep(RETRY_DELAY_SECONDS)
+        retry_df = _download_close([tickers[k] for k in missing], as_of_date)
+        if as_of_date in retry_df.index:
+            for k in missing:
+                if k in retry_df.columns and not pd.isna(retry_df.at[as_of_date, k]):
+                    row[k] = retry_df.at[as_of_date, k]
+        missing = [k for k in missing if row[k] is None or pd.isna(row[k])]
+
+    if missing:
+        print(f"Bez wartości po {MAX_RETRIES + 1} próbach (zapisane jako null - np. święto na danej giełdzie): {missing}")
+
+    return {k: (None if v is None or pd.isna(v) else float(v)) for k, v in row.items()}
+
+
 def save_latest_market_data(as_of_date: pd.Timestamp):
     """
     Pobiera z yfinance ceny zamknięcia wszystkich śledzonych instrumentów za
@@ -103,31 +165,14 @@ def save_latest_market_data(as_of_date: pd.Timestamp):
         print(f"{date_str} to weekend (wg czasu US/Eastern) - pomijam zapis.")
         return
 
-    # period liczone jest przez yfinance wstecz od DZISIAJ, nie od as_of_date -
-    # przy codziennym, "żywym" uruchomieniu (as_of_date == dziś) 2 dni w zupełności
-    # wystarczą. Przy uzupełnianiu zaległej/historycznej daty trzeba sięgnąć
-    # wystarczająco daleko wstecz, żeby as_of_date w ogóle znalazło się w oknie -
-    # to warunek konieczny, żeby historyczne uzupełnianie bazy działało poprawnie.
-    real_today = pd.Timestamp.now(tz="America/New_York").normalize().tz_localize(None)
-    days_diff = (real_today - as_of_date).days
-    period = "2d" if days_diff <= 0 else f"{days_diff + 1}d"
-
-    print(f"Pobieranie danych rynkowych (as_of wg US/Eastern: {date_str}, period={period})...")
-    df_raw = yf.download(list(tickers.values()), period=period, interval="1d", progress=False)['Close']
-    df_raw = normalize_market_data(df_raw)
-
-    # Nie szukamy "ostatniego dostępnego dnia" - interesuje nas WYŁĄCZNIE
-    # dzisiejsza data (wg czasu rynku złota). Jeśli jej nie ma w indeksie,
-    # nie zapisujemy niczego - to nie jest "dzisiejszy" rekord.
-    if as_of_date not in df_raw.index:
+    print(f"Pobieranie danych rynkowych (as_of wg US/Eastern: {date_str}, okno {DOWNLOAD_WINDOW_DAYS} dni)...")
+    row_dict = fetch_market_row(as_of_date)
+    if row_dict is None:
         print(f"Brak jakichkolwiek danych dla {date_str} (dane jeszcze nieopublikowane).")
         return
 
     # BEZ ffill - zapisujemy dokładnie to, co zwróciło API dla TEJ konkretnej
     # daty. Braki zostają jako null (czysty status rynku danego dnia).
-    row_dict = df_raw.loc[as_of_date].to_dict()
-    row_dict = {k: (None if pd.isna(v) else float(v)) for k, v in row_dict.items()}
-
     actual_gold_value = row_dict.pop("Y_Gold", None)
 
     payload = {
