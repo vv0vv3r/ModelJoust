@@ -42,7 +42,11 @@ def main(as_of_date: pd.Timestamp | None = None):
     reszta funkcji działa identycznie w obu przypadkach.
     """
     if as_of_date is None:
-        as_of_date = pd.Timestamp.now(tz="America/New_York").normalize().tz_localize(None)
+        # Cofnięcie o 6 h: harmonogram GitHub Actions bywa opóźniony o 2-3 h,
+        # a uruchomienie po północy w NY wziąłoby już kolejny dzień (np. sobotę
+        # zamiast piątku -> piątek przepada). Z cofnięciem dzień sesji zostaje
+        # właściwy przy opóźnieniu do ~10 h.
+        as_of_date = (pd.Timestamp.now(tz="America/New_York") - pd.Timedelta(hours=6)).normalize().tz_localize(None)
     today_str = as_of_date.strftime("%Y-%m-%d")
 
     # Odczyt RAZ na starcie - cały przebieg działa na jednym, spójnym

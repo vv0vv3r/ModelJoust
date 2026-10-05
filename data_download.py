@@ -191,5 +191,6 @@ def save_latest_market_data(as_of_date: pd.Timestamp):
 
 
 if __name__ == "__main__":
-    _as_of_date = pd.Timestamp.now(tz="America/New_York").normalize().tz_localize(None)
+    # To samo cofnięcie o 6 h co w main_pipeline.py (odporność na opóźnienia harmonogramu)
+    _as_of_date = (pd.Timestamp.now(tz="America/New_York") - pd.Timedelta(hours=6)).normalize().tz_localize(None)
     save_latest_market_data(_as_of_date)
