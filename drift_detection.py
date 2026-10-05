@@ -234,7 +234,12 @@ def check_model_data_drift(feature_drift_flags: dict, selected_features: list,
 def update_page_hinkley(cd_stats: dict | None, today_error: float,
                           delta: float = 0.005, lambda_threshold: float = 5.0) -> tuple[bool, dict]:
     """
-    Aktualizuje stan detektora Page-Hinkley o dzisiejszy błąd.
+    Aktualizuje stan detektora Page-Hinkley o dzisiejszą obserwację.
+    today_error: błąd modelu MINUS błąd modelu naiwnego z tego samego dnia,
+    oba jako ułamek ceny (0.01 = 1 pp) - patrz main_pipeline.py. delta i
+    lambda_threshold muszą być w tych samych jednostkach (ułamek, nie %).
+    Alarm po ok. lambda / (wzrost_sygnału - delta) sesjach utrzymującego się
+    pogorszenia względem modelu naiwnego.
     cd_stats: {"mean_error":.., "n":.., "cumulative_sum":.., "min_cumulative_sum":..} albo None.
     Zwraca (drift_detected, nowy_cd_stats).
     """

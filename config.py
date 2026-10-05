@@ -7,8 +7,12 @@ from db_client import supabase
 DEFAULT_CONFIG = {
     "data_drift_z_threshold": (3.0, "Próg Z-score dla Data Drift"),
     "data_drift_pct_threshold": (0.20, "Odsetek zdryfowanych cech wymagany do retreningu"),
-    "concept_drift_delta": (0.005, "Page-Hinkley delta"),
-    "concept_drift_lambda": (5.0, "Page-Hinkley lambda_threshold"),
+    "concept_drift_delta": (
+        0.0005, "Page-Hinkley delta (ułamek ceny, na błędzie względem modelu naiwnego)"
+    ),
+    "concept_drift_lambda": (
+        0.03, "Page-Hinkley lambda_threshold (ułamek ceny, na błędzie względem modelu naiwnego)"
+    ),
     "active_model_margin": (0.005, "Margines względnej poprawy MAPE do przełączenia"),
     "active_model_streak_days": (2, "Ile dni z rzędu trzeba pobijać aktywny model"),
     "rolling_mape_window_days": (29, "Okno kroczącego MAPE (dni)"),

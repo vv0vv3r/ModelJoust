@@ -62,6 +62,14 @@ def main(as_of_date: pd.Timestamp | None = None):
 
     models_logs_by_name = fetch_active_models_info()
 
+    # Dzisiejszy błąd modelu naiwnego = wielkość dzisiejszego ruchu ceny złota
+    # ("jak trudny był dzień"). Concept Drift śledzi błąd KAŻDEGO modelu
+    # pomniejszony o tę wartość - sam błąd bezwzględny rośnie też przy wzroście
+    # zmienności rynku (dla wszystkich modeli naraz, łącznie z naiwnym), a to
+    # nie jest zmiana relacji cechy->cena. Dla samego naiwnego sygnał jest
+    # zawsze 0, więc detektor nigdy się dla niego nie uruchomi.
+    naive_error = todays_errors.get("naive")
+
     # --- Krok 1: dla każdego modelu ustal, czy potrzebny jest retrening
     # (brak wpisu w models_logs, martwa cecha, Data Drift albo Concept Drift) ---
     retrain_flags = {}
@@ -101,15 +109,16 @@ def main(as_of_date: pd.Timestamp | None = None):
         else:
             today_error = todays_errors.get(model_type)
 
-            if today_error is None:
-                # brak dzisiejszej ewaluacji dla tego modelu (np. brak pending
-                # predykcji albo złoto miało dziś święto) - nic nie sprawdzamy,
-                # stan detektora zostaje bez zmian
+            if today_error is None or naive_error is None:
+                # brak dzisiejszej ewaluacji dla tego modelu albo dla naiwnego
+                # punktu odniesienia (np. brak pending predykcji albo złoto
+                # miało dziś święto) - nic nie sprawdzamy, stan detektora
+                # zostaje bez zmian
                 retrain_flags[model_type] = False
                 continue
 
             concept_drift, new_cd_stats = update_page_hinkley(
-                cd_stats, today_error,
+                cd_stats, today_error - naive_error,
                 delta=config["concept_drift_delta"], lambda_threshold=config["concept_drift_lambda"],
             )
             

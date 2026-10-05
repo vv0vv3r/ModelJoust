@@ -46,18 +46,20 @@ CONFIG_META = {
     "concept_drift_delta": {
         "category": "Concept Drift (Page-Hinkley)",
         "effect": (
-            "Tolerancja odejmowana co dzień od błędu w liczniku Page-Hinkley. Wyżej = licznik "
-            "rośnie wolniej, dryf koncepcji wykrywany później. Niżej = szybsza reakcja, więcej "
-            "fałszywych alarmów."
+            "Tolerancja odejmowana co dzień w liczniku Page-Hinkley, w jednostkach ułamka ceny "
+            "(0.001 = 0,1 pp). Licznik śledzi błąd modelu MINUS błąd modelu naiwnego, więc "
+            "delta to przewaga błędu nad naiwnym, którą jeszcze ignorujemy. Wyżej = dryf "
+            "koncepcji wykrywany później. Niżej = szybsza reakcja, więcej fałszywych alarmów."
         ),
         "validate": lambda v: None if (_is_number(v) and v >= 0) else "Musi być liczbą nieujemną.",
     },
     "concept_drift_lambda": {
         "category": "Concept Drift (Page-Hinkley)",
         "effect": (
-            "Próg, po którego przekroczeniu Page-Hinkley zgłasza dryf koncepcji. Wyżej = wymaga "
-            "większego utrzymującego się pogorszenia, wolniejsza detekcja. Niżej = szybsza, ale "
-            "bardziej fałszywie-alarmowa."
+            "Próg, po którego przekroczeniu Page-Hinkley zgłasza dryf koncepcji, w jednostkach "
+            "ułamka ceny (0.03 = 3 pp skumulowanej przewagi błędu modelu nad naiwnym). Alarm po "
+            "ok. lambda / (pogorszenie - delta) sesjach. Wyżej = wolniejsza detekcja. Niżej = "
+            "szybsza, ale więcej fałszywych alarmów."
         ),
         "validate": lambda v: None if (_is_number(v) and v > 0) else "Musi być liczbą dodatnią.",
     },
