@@ -1,8 +1,11 @@
 import numpy as np
 import pandas as pd
 import shap
+from sklearn.dummy import DummyRegressor
 from sklearn.linear_model import Lasso, LassoCV
 from sklearn.model_selection import TimeSeriesSplit
+from sklearn.pipeline import Pipeline, make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 from drift_detection import fetch_full_history_returns
 from model_registry import get_next_model_version, save_model_to_storage, load_model_from_storage
@@ -19,6 +22,13 @@ class LassoModel:
     poziomach byłby bez sensu statystycznego. Selekcja cech odbywa się
     automatycznie przez regularyzację (nieistotne cechy dostają współczynnik
     0), siła regularyzacji (alpha) dobierana przez cross-walidację (LassoCV).
+
+    Cechy są standaryzowane przed dopasowaniem - kara L1 zależy od skali
+    cechy, więc bez standaryzacji instrumenty o dużej dziennej zmienności
+    (krypto, gaz) potrzebowałyby mniejszego współczynnika na ten sam efekt
+    i byłyby karane słabiej niż spokojne (obligacje, waluty), niezależnie od
+    swojej przydatności. Skaler jest dopasowywany w każdym foldzie
+    TimeSeriesSplit osobno (pipeline), więc nie widzi danych walidacyjnych.
     """
 
     def __init__(self, storage_path: str | None = None, baseline_stats: dict | None = None,
@@ -79,27 +89,28 @@ class LassoModel:
         X_train = train_df
         all_candidates = list(X_train.columns)
 
-        cv_model = LassoCV(
-            cv=TimeSeriesSplit(n_splits=int(self.config["cv_splits"])), max_iter=LASSO_MAX_ITER
+        cv_pipeline = make_pipeline(
+            StandardScaler(),
+            LassoCV(cv=TimeSeriesSplit(n_splits=int(self.config["cv_splits"])), max_iter=LASSO_MAX_ITER),
         ).fit(X_train, y_train)
+        cv_model = cv_pipeline[-1]
         selected_features = [f for f, coef in zip(all_candidates, cv_model.coef_) if coef != 0]
 
         if not selected_features:
-            # Regularyzacja spłaszczyła WSZYSTKIE współczynniki do zera - zamiast
-            # zwracać model bez predyktorów, zostawiamy jedną, najsilniejszą wg
-            # |coef| cechę z pełnego dopasowania, żeby predict() miało na czym
-            # pracować. Głośny print, nie ciche pominięcie.
+            # Regularyzacja wyzerowała WSZYSTKIE współczynniki - walidacja
+            # wskazała, że żadna cecha nie przewiduje jutrzejszego zwrotu lepiej
+            # niż sama średnia. To uczciwy wynik, nie błąd: model przewiduje
+            # wtedy średni zwrot z okna treningowego (bez predyktorów).
             print("LassoModel: WSZYSTKIE współczynniki wyzerowane przez regularyzację - "
-                  "zostawiam jedną cechę o najwyższej |wadze| jako awaryjne zabezpieczenie.")
-            best_idx = int(np.argmax(np.abs(cv_model.coef_)))
-            selected_features = [all_candidates[best_idx]]
-
-        # Refit na samych wybranych cechach (najpierw wybierz, potem dopasuj
-        # finalny, mniejszy model) - upraszcza predict()/SHAP, bo nie trzeba
-        # karmić modelu wszystkimi kandydatami co dzień.
-        final_model = Lasso(alpha=cv_model.alpha_, max_iter=LASSO_MAX_ITER).fit(
-            X_train[selected_features], y_train
-        )
+                  "model bez predyktorów, prognoza = średni zwrot z okna treningowego.")
+            final_model = DummyRegressor(strategy="mean").fit(X_train, y_train)
+        else:
+            # Refit na samych wybranych cechach (najpierw wybierz, potem dopasuj
+            # finalny, mniejszy model) - upraszcza predict()/SHAP, bo nie trzeba
+            # karmić modelu wszystkimi kandydatami co dzień.
+            final_model = make_pipeline(
+                StandardScaler(), Lasso(alpha=cv_model.alpha_, max_iter=LASSO_MAX_ITER)
+            ).fit(X_train[selected_features], y_train)
 
         self.model = final_model
         self.selected_features = selected_features
@@ -121,19 +132,24 @@ class LassoModel:
         zwrotów wybranych cech."""
         if self.today_data is None:
             raise ValueError("Brak danych - wywołaj load_data() przed predict().")
-        if self.model is None or not self.selected_features:
+        if self.model is None:
             raise ValueError("Brak wytrenowanego modelu - wywołaj retrain_if_needed(True, ...) przed predict().")
 
-        returns = self.today_data["returns"]
-        x_values = [returns[feature] for feature in self.selected_features]
-
-        x_row = pd.DataFrame([x_values], columns=self.selected_features)
-        predicted_return = float(self.model.predict(x_row)[0])
-
         last_actual_y_level = self.today_data["last_actual_y_level"]
-        predicted_price = last_actual_y_level * (1 + predicted_return)
 
-        shap_values = self._compute_shap(x_row, last_actual_y_level)
+        if not self.selected_features:
+            # Model bez predyktorów (patrz retrain_if_needed) - stały,
+            # średni zwrot, brak cech do wytłumaczenia przez SHAP.
+            predicted_return = float(np.ravel(self.model.constant_)[0])
+            shap_values = {}
+        else:
+            returns = self.today_data["returns"]
+            x_values = [returns[feature] for feature in self.selected_features]
+            x_row = pd.DataFrame([x_values], columns=self.selected_features)
+            predicted_return = float(self.model.predict(x_row)[0])
+            shap_values = self._compute_shap(x_row, last_actual_y_level)
+
+        predicted_price = last_actual_y_level * (1 + predicted_return)
 
         return {
             "predicted_value": predicted_price,
@@ -157,8 +173,7 @@ class LassoModel:
         jednostkach zwrotu (ułamek) - przemnożenie przez last_actual_y_level
         daje wkład w dolarach."""
         means = np.array([[self.baseline_stats[f]["mean"] for f in self.selected_features]])
-        coef = self.model.coef_
-        intercept = self.model.intercept_
+        coef, intercept = self._original_scale_coefficients()
 
         explainer = shap.LinearExplainer((coef, intercept), means)
         raw_shap_values = explainer.shap_values(x_row.values)[0]
@@ -167,3 +182,15 @@ class LassoModel:
             feature: float(value) * last_actual_y_level
             for feature, value in zip(self.selected_features, raw_shap_values)
         }
+
+    def _original_scale_coefficients(self) -> tuple[np.ndarray, float]:
+        """Współczynniki w jednostkach SUROWYCH zwrotów (nie standaryzowanych),
+        żeby SHAP liczył się na tych samych danych co zawsze: beta = beta_std /
+        skala, wyraz wolny przesunięty o średnie skalera. Obsługuje też starsze
+        wersje zapisane jako sam Lasso, bez skalera."""
+        if not isinstance(self.model, Pipeline):
+            return self.model.coef_, float(self.model.intercept_)
+        scaler, lasso = self.model[0], self.model[-1]
+        coef = lasso.coef_ / scaler.scale_
+        intercept = float(lasso.intercept_ - np.sum(lasso.coef_ * scaler.mean_ / scaler.scale_))
+        return coef, intercept

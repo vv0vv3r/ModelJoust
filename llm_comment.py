@@ -16,6 +16,10 @@ client = Groq(api_key=GROQ_API_KEY)
 MODEL_NAME = "openai/gpt-oss-20b"
 
 NAIVE_STATIC_COMMENT = "Model bazowy: prognoza równa ostatniej znanej cenie złota."
+NO_PREDICTORS_STATIC_COMMENT = (
+    "Model nie znalazł cech, które przewidywałyby jutrzejszą zmianę ceny lepiej niż "
+    "średnia historyczna - prognoza to ostatnia cena powiększona o średni dzienny zwrot."
+)
 
 
 def build_llm_comment(model_type: str, shap_values: dict | None, predicted_value: float) -> str:
@@ -24,8 +28,12 @@ def build_llm_comment(model_type: str, shap_values: dict | None, predicted_value
     Dla modelu naiwnego (shap_values=None) - stały tekst, bez wywołania LLM
     (nie ma cech do wytłumaczenia).
     """
-    if not shap_values:
+    if model_type == "naive":
         return NAIVE_STATIC_COMMENT
+    if not shap_values:
+        # Model bez predyktorów (np. Lasso, które wyzerowało wszystkie
+        # współczynniki) - nie ma czego tłumaczyć, LLM niepotrzebny.
+        return NO_PREDICTORS_STATIC_COMMENT
 
     sorted_contributions = sorted(shap_values.items(), key=lambda kv: abs(kv[1]), reverse=True)
     contributions_text = "\n".join(
