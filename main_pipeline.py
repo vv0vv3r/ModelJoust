@@ -1,3 +1,4 @@
+import sys
 import warnings
 
 import pandas as pd
@@ -8,7 +9,7 @@ import pandas as pd
 # (tracebacki) nie są tą kategorią, więc nadal będą widoczne normalnie.
 warnings.filterwarnings("ignore", category=ResourceWarning)
 
-from data_download import save_latest_market_data
+from data_download import save_latest_market_data, DATA_WARNINGS
 from prediction_evaluation import evaluate_predictions_and_update_system_logs
 from drift_detection import fetch_recent_window, build_today_return_row, fetch_active_models_info, compute_feature_drift_flags, check_model_data_drift, update_page_hinkley, compute_dead_features
 from models.naive_model import NaiveModel
@@ -169,3 +170,12 @@ def main(as_of_date: pd.Timestamp | None = None):
 
 if __name__ == "__main__":
     main()
+
+    # Przebieg doszedł do końca (dane, ocena, prognozy zapisane), ale z
+    # odrzuconymi danymi - kod błędu oznacza uruchomienie w GitHub Actions
+    # jako nieudane, a GitHub wysyła wtedy maila. "::error::" pokazuje
+    # komunikat w podsumowaniu uruchomienia.
+    if DATA_WARNINGS:
+        for warning in DATA_WARNINGS:
+            print(f"::error::{warning}")
+        sys.exit(1)

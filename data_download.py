@@ -105,6 +105,20 @@ DOWNLOAD_WINDOW_DAYS = 7
 MAX_RETRIES = 2
 RETRY_DELAY_SECONDS = 3
 
+# Kontrola wiarygodności ceny złota (zmienna przewidywana): ruch większy niż
+# ten próg względem ostatniej ZAPISANEJ w bazie ceny jest najpewniej błędnym
+# odczytem (np. 41.7 zamiast 4170) - złoto w skrajnych dniach rusza się o
+# kilkanaście procent. Po MAX_RETRIES ponownych pobraniach z tym samym wynikiem cena jest
+# ODRZUCANA (zapis jako null = dzień jak bez notowania: prognozy 'unused',
+# bez oceny i bez retreningu na tej wartości), a ostrzeżenie trafia do
+# DATA_WARNINGS - main_pipeline.py kończy wtedy przebieg kodem błędu, więc
+# GitHub Actions wysyła maila o nieudanym uruchomieniu.
+MAX_GOLD_DAILY_MOVE = 0.30
+
+# Ostrzeżenia o danych z bieżącego przebiegu (lista modyfikowana w miejscu,
+# importowana przez main_pipeline.py).
+DATA_WARNINGS: list[str] = []
+
 
 def _download_close(symbols: list[str], as_of_date: pd.Timestamp) -> pd.DataFrame:
     start = (as_of_date - pd.Timedelta(days=DOWNLOAD_WINDOW_DAYS)).strftime("%Y-%m-%d")
@@ -113,12 +127,63 @@ def _download_close(symbols: list[str], as_of_date: pd.Timestamp) -> pd.DataFram
     return normalize_market_data(df_raw)
 
 
+def _last_saved_gold(as_of_date: pd.Timestamp) -> float | None:
+    """Ostatnia niepusta cena złota w raw_data sprzed as_of_date. W bazie są
+    tylko wartości, które przeszły kontrolę (odrzucone zapisują się jako null),
+    więc to czysty punkt odniesienia - niezależny od tego, co Yahoo trzyma w
+    swojej historii."""
+    response = (
+        supabase.table("raw_data")
+        .select("actual_y")
+        .lt("target_date", as_of_date.strftime("%Y-%m-%d"))
+        .not_.is_("actual_y", "null")
+        .order("target_date", desc=True)
+        .limit(1)
+        .execute()
+    )
+    return float(response.data[0]["actual_y"]) if response.data else None
+
+
+def _check_gold_plausibility(row: dict, as_of_date: pd.Timestamp) -> None:
+    """Jeśli dzisiejsza cena złota odbiega od ostatniej zapisanej o więcej niż
+    MAX_GOLD_DAILY_MOVE, pobiera ją ponownie do MAX_RETRIES razy; jeśli nadal
+    odbiega - odrzuca ją (None) i dopisuje ostrzeżenie do DATA_WARNINGS.
+    Poprawia row["Y_Gold"] w miejscu."""
+    reference = _last_saved_gold(as_of_date)
+    if reference is None:
+        return
+
+    def is_suspicious(value) -> bool:
+        return value is not None and not pd.isna(value) and abs(value / reference - 1) > MAX_GOLD_DAILY_MOVE
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        if not is_suspicious(row.get("Y_Gold")):
+            return
+        print(f"Złoto: ruch {row['Y_Gold'] / reference - 1:+.1%} względem ostatniej zapisanej ceny "
+              f"({reference:.2f} -> {row['Y_Gold']:.2f}) - podejrzany odczyt, "
+              f"próba {attempt + 1}/{MAX_RETRIES + 1}: ponowne pobranie.")
+        time.sleep(RETRY_DELAY_SECONDS)
+        retry_df = _download_close([tickers["Y_Gold"]], as_of_date)
+        if as_of_date in retry_df.index and not pd.isna(retry_df.at[as_of_date, "Y_Gold"]):
+            row["Y_Gold"] = retry_df.at[as_of_date, "Y_Gold"]
+
+    if is_suspicious(row.get("Y_Gold")):
+        message = (f"{as_of_date.strftime('%Y-%m-%d')}: cena złota {row['Y_Gold']:.2f} odbiega o "
+                   f"{row['Y_Gold'] / reference - 1:+.1%} od ostatniej zapisanej ({reference:.2f}) po "
+                   f"{MAX_RETRIES + 1} próbach - odrzucona (zapisana jako null, dzień jak bez notowania).")
+        print(f"UWAGA: {message}")
+        DATA_WARNINGS.append(message)
+        row["Y_Gold"] = None
+
+
 def fetch_market_row(as_of_date: pd.Timestamp) -> dict | None:
     """
     Zwraca {klucz_instrumentu: cena zamknięcia albo None} za as_of_date albo
     None, jeśli dla tej daty nie ma jeszcze żadnych danych. Instrumenty bez
-    wartości są pobierane ponownie pojedynczo (do MAX_RETRIES razy). Bez
-    zapisu do bazy - używane przez save_latest_market_data().
+    wartości są pobierane ponownie pojedynczo (do MAX_RETRIES razy), cena
+    złota przechodzi kontrolę wiarygodności (_check_gold_plausibility). Bez
+    zapisu do bazy (tylko odczyt ostatniej ceny złota) - używane przez
+    save_latest_market_data().
     """
     df = _download_close(list(tickers.values()), as_of_date)
 
@@ -145,6 +210,8 @@ def fetch_market_row(as_of_date: pd.Timestamp) -> dict | None:
 
     if missing:
         print(f"Bez wartości po {MAX_RETRIES + 1} próbach (zapisane jako null - np. święto na danej giełdzie): {missing}")
+
+    _check_gold_plausibility(row, as_of_date)
 
     return {k: (None if v is None or pd.isna(v) else float(v)) for k, v in row.items()}
 
