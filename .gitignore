@@ -166,3 +166,7 @@ docs/
 # Analiza wrażliwości parametrów - jednorazowy eksperyment, nie na stałe w repo
 sensitivity_analysis/
 .github/workflows/sensitivity_sweep.yml
+
+# Symulacje lokalne - dane wejściowe z yfinance i wyniki (kod w simulation/ zostaje w repo)
+simulation/data/
+simulation/results/
