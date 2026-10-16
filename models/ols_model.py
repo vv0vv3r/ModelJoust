@@ -60,7 +60,7 @@ class OLSModel:
 
         print("OLSModel: rozpoczynam retrening...")
         returns_df, dead_features = fetch_full_history_returns(
-            as_of_date, window_years=int(self.config["training_window_years"])
+            as_of_date, window_years=float(self.config["training_window_years"])
         )
 
         if dead_features:

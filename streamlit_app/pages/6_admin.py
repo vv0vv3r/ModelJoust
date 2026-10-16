@@ -78,6 +78,12 @@ def render_value_input(row: dict, disabled: bool):
         except json.JSONDecodeError as e:
             st.error(f"Niepoprawny JSON w linii {e.lineno}, kolumna {e.colno} — sprawdź przecinki, cudzysłowy i nawiasy.")
             return None
+    step = (CONFIG_META.get(row["key"]) or {}).get("step")
+    if step is not None:
+        return st.number_input(
+            "Wartość", value=float(value), step=step, format="%.1f",
+            key=widget_key, disabled=disabled, label_visibility="collapsed",
+        )
     if isinstance(value, int):
         return st.number_input(
             "Wartość", value=value, step=1, key=widget_key, disabled=disabled, label_visibility="collapsed"

@@ -40,7 +40,7 @@ def fetch_recent_window(as_of_date: pd.Timestamp, days_back: int = 15) -> pd.Dat
     return features_df.sort_index()
 
 
-def fetch_full_history_returns(as_of_date: pd.Timestamp, window_years: int = 5) -> tuple[pd.DataFrame, list[str]]:
+def fetch_full_history_returns(as_of_date: pd.Timestamp, window_years: float = 5) -> tuple[pd.DataFrame, list[str]]:
     """
     Pobiera historię raw_data z ostatnich `window_years` lat DO as_of_date
     włącznie (NIE całą dostępną historię od początku) i zwraca (returns_df,
@@ -73,7 +73,10 @@ def fetch_full_history_returns(as_of_date: pd.Timestamp, window_years: int = 5) 
     (lookahead bias).
     """
     as_of_date_str = as_of_date.strftime("%Y-%m-%d")
-    cutoff_date_str = (as_of_date - pd.DateOffset(years=window_years)).strftime("%Y-%m-%d")
+    # W miesiącach, nie latach - pandas nie przyjmuje ułamkowych lat, a okno
+    # może być np. pół roku (window_years=0.5 -> 6 miesięcy).
+    window_months = round(window_years * 12)
+    cutoff_date_str = (as_of_date - pd.DateOffset(months=window_months)).strftime("%Y-%m-%d")
     page_size = 1000
     all_rows = []
     start = 0

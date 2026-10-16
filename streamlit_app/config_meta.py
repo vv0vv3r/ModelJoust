@@ -97,7 +97,11 @@ CONFIG_META = {
             "ale ryzyko mieszania starych reżimów rynkowych (inne stopy procentowe, inny reżim QE). "
             "Niżej = bardziej aktualne, ale mniej danych - mniej stabilna selekcja i wyższe VIF/p-value."
         ),
-        "validate": lambda v: None if (_is_int(v) and v >= 1) else "Musi być liczbą całkowitą >= 1 (lata).",
+        "validate": lambda v: None if (_is_number(v) and v >= 0.5 and float(v * 2).is_integer())
+        else "Musi być wielokrotnością 0,5 roku (np. 0.5, 1, 2).",
+        # Pole w panelu jako liczba z krokiem 0,5 - bez tego wartość zapisana
+        # jako całkowita (np. 3) dawałaby pole tylko dla liczb całkowitych.
+        "step": 0.5,
     },
     "ols_p_value_threshold": {
         "category": "Trening — OLS",
