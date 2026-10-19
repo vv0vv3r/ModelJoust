@@ -137,7 +137,10 @@ def evaluate_predictions_and_update_system_logs(today_str: str, config: dict):
         supabase.table("system_logs")
         .select("*")
         .order("log_date", desc=True)
-        .limit(streak_days - 1)
+        # Co najmniej 1 wiersz - z niego bierze się dzisiejszy aktywny model
+        # (przy streak_days=1 limit(0) nie zwróciłby nic i aktywny byłby
+        # zawsze naiwny). Nadmiarowy wiersz odcina niżej [-streak_days:].
+        .limit(max(streak_days - 1, 1))
         .execute()
     )
     last_logs = list(reversed(last_logs_response.data))  # od najstarszego do najnowszego

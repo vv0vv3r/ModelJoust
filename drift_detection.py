@@ -33,11 +33,21 @@ def fetch_recent_window(as_of_date: pd.Timestamp, days_back: int = 15) -> pd.Dat
 
     df = pd.DataFrame(rows)
     df["target_date"] = pd.to_datetime(df["target_date"])
-    features_df = pd.json_normalize(df["features"])
+    features_df = _features_frame(df["features"])
     features_df.index = df["target_date"]
     features_df["actual_y"] = df["actual_y"].values
 
     return features_df.sort_index()
+
+
+def _features_frame(features: pd.Series) -> pd.DataFrame:
+    """Rozpakowuje kolumnę features (JSONB) do tabeli z kolumnami
+    POSORTOWANYMI alfabetycznie. Kolejność kluczy JSONB zależy od bazy
+    (Postgres sortuje je po długości), a kolejność kolumn zmienia wynik
+    treningu RF/XGBoost (remisy przy wyborze podziału) - stała kolejność
+    daje ten sam model niezależnie od źródła danych."""
+    features_df = pd.json_normalize(features)
+    return features_df[sorted(features_df.columns)]
 
 
 def fetch_full_history_returns(as_of_date: pd.Timestamp, window_years: float = 5) -> tuple[pd.DataFrame, list[str]]:
@@ -101,7 +111,7 @@ def fetch_full_history_returns(as_of_date: pd.Timestamp, window_years: float = 5
 
     df = pd.DataFrame(all_rows)
     df["target_date"] = pd.to_datetime(df["target_date"])
-    features_df = pd.json_normalize(df["features"])
+    features_df = _features_frame(df["features"])
     features_df.index = df["target_date"]
     features_df["actual_y"] = df["actual_y"].values
     features_df = features_df.sort_index()
