@@ -6,6 +6,10 @@ summarize.py.
 Każda symulacja startuje od zera WARMUP_MONTHS przed okresem, który jest
 oceniany - rozbieg (pierwszy trening wszystkich modeli, zapełnienie okna
 kroczącego MAPE) nie wchodzi do wyników.
+
+UWAGA: import tego modułu (a więc też summarize.py i run_*.py) podstawia
+atrapę bazy za db_client (sandbox.py). Nie importować modułów simulation/
+w skryptach, które mają pracować na produkcyjnej bazie.
 """
 import simulation.sandbox  # noqa: F401  (config.py importuje db_client)
 

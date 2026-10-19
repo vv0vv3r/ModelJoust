@@ -92,8 +92,10 @@ def summarize_run(folder: Path, period_start: str, period_end: str) -> dict:
     sequence = "".join(MODEL_CODES[m] for m in daily["active_model"])
     summary["zmiany_championa"] = sum(a != b for a, b in zip(sequence, sequence[1:]))
 
-    # Dzień retreningu = sesja po train_end_date (model trenuje na danych do
-    # poprzedniej sesji, bo cel to cena z kolejnego dnia).
+    # Retreningi WYKONANE w ocenianym okresie. Dzień retreningu = sesja po
+    # train_end_date (model trenuje na danych do poprzedniej sesji, bo cel to
+    # cena z kolejnego dnia). Retrening z ostatniego dnia okresu też się
+    # liczy, choć wpływa dopiero na prognozę spoza okresu.
     models_logs = pd.read_csv(folder / "models_logs.csv")
     retrain_day = (
         pd.to_datetime(models_logs["train_end_date"]) + pd.tseries.offsets.BDay(1)

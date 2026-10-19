@@ -320,6 +320,9 @@ class FakeSupabase:
             if existing is None:
                 result.extend(self._insert(table, item))
             else:
+                unknown = set(item) - set(SCHEMA[table]["columns"])
+                if unknown:
+                    raise ValueError(f"Nieznane kolumny w '{table}': {unknown}")
                 existing.update(_json_roundtrip(item))
                 result.append(copy.deepcopy(existing))
         return result

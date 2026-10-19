@@ -85,6 +85,9 @@ def run_simulation(name: str, start_date: str, end_date: str, params: dict | Non
     params = params or {}
     out_dir = RESULTS_DIR / name
     out_dir.mkdir(parents=True, exist_ok=True)
+    # meta.json = "symulacja zakończona" - przy liczeniu od nowa stary plik
+    # nie może zostać obok nowych, niedokończonych wyników.
+    (out_dir / "meta.json").unlink(missing_ok=True)
 
     _ensure_market_data()
     sandbox.fake_supabase.reset_results()
