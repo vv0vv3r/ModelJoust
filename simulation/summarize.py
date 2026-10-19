@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from simulation.settings import PARAM_GRID, TUNING_END, TUNING_START
+from simulation.settings import PARAM_GRID, TUNING_END, TUNING_START, folder_name
 
 MODEL_TYPES = ["naive", "OLS", "lasso", "random_forest", "xgboost"]
 MODEL_CODES = {"naive": "n", "OLS": "o", "lasso": "l", "random_forest": "r", "xgboost": "x"}
@@ -102,16 +102,16 @@ def summarize_run(folder: Path, period_start: str, period_end: str) -> dict:
 
 def build_grid_summary(results_dir: Path) -> pd.DataFrame:
     """Podsumowanie wszystkich ZAKOŃCZONYCH symulacji siatki (folder z
-    meta.json i parametrami z PARAM_GRID), posortowane od najlepszego
-    MAPE systemu."""
+    meta.json, nazwany dokładnie wg folder_name(params) - tak nazywa je
+    tylko run_grid.py), posortowane od najlepszego MAPE systemu."""
     rows = []
     for folder in sorted(results_dir.iterdir()):
         meta_path = folder / "meta.json"
         if not meta_path.exists():
             continue
         params = json.loads(meta_path.read_text(encoding="utf-8"))["params"]
-        if set(params) != set(PARAM_GRID):
-            continue  # np. test albo ocena końcowa - nie część siatki
+        if set(params) != set(PARAM_GRID) or folder.name != folder_name(params):
+            continue  # np. test albo ocena końcowa (inna nazwa folderu) - nie część siatki
         rows.append(summarize_run(folder, TUNING_START, TUNING_END))
     df = pd.DataFrame(rows)
     return df.sort_values("mape_system").reset_index(drop=True) if not df.empty else df
