@@ -98,7 +98,13 @@ def run_simulation(name: str, start_date: str, end_date: str, params: dict | Non
 
     failures = []
     t0 = time.time()
-    with open(out_dir / "pipeline.log", "w", encoding="utf-8") as log, contextlib.redirect_stdout(log):
+    # stdout i stderr (ostrzeżenia bibliotek, np. ConvergenceWarning z Lasso)
+    # idą do logu - w terminalu zostaje tylko postęp co 20 dni.
+    with (
+        open(out_dir / "pipeline.log", "w", encoding="utf-8") as log,
+        contextlib.redirect_stdout(log),
+        contextlib.redirect_stderr(log),
+    ):
         for i, date in enumerate(sim_dates, start=1):
             print(f"\n{'=' * 80}\nDzień {i}/{len(sim_dates)}: {date.date()}\n{'=' * 80}")
             try:
