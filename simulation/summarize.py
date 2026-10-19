@@ -140,10 +140,17 @@ def grid_run_problem(folder: Path) -> str | None:
 def build_grid_summary(results_dir: Path) -> pd.DataFrame:
     """Podsumowanie wszystkich zakończonych symulacji siatki zgodnych z
     bieżącymi ustawieniami (grid_run_problem), posortowane od najlepszego
-    MAPE systemu."""
+    MAPE systemu. Folder, którego nie da się podsumować (np. wszystkie dni z
+    błędem), dostaje wiersz z opisem błędu zamiast przerywać całość."""
     rows = []
     for folder in sorted(results_dir.iterdir()):
         if folder.is_dir() and grid_run_problem(folder) is None:
-            rows.append(summarize_run(folder, TUNING_START, TUNING_END))
+            try:
+                rows.append(summarize_run(folder, TUNING_START, TUNING_END))
+            except Exception as e:
+                print(f"UWAGA: nie da się podsumować {folder.name}: {e!r}")
+                rows.append({"folder": folder.name, "blad_podsumowania": repr(e)})
     df = pd.DataFrame(rows)
-    return df.sort_values("mape_system").reset_index(drop=True) if not df.empty else df
+    if "mape_system" not in df.columns:
+        return df  # pusto albo same foldery z błędem podsumowania
+    return df.sort_values("mape_system", na_position="last").reset_index(drop=True)

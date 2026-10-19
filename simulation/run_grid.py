@@ -42,7 +42,14 @@ def run_grid() -> None:
             print(f"[{i}/{len(combos)}] {name} - liczę od nowa: {problem}.")
 
         print(f"\n[{i}/{len(combos)}] {name}")
-        out_dir = run_simulation(name, start, TUNING_END, params)
+        try:
+            out_dir = run_simulation(name, start, TUNING_END, params)
+        except Exception as e:
+            # Pętla idzie dalej; folder bez meta.json zostanie policzony od
+            # nowa przy kolejnym uruchomieniu. Ctrl+C (KeyboardInterrupt) nie
+            # jest Exception, więc nadal zatrzymuje siatkę.
+            print(f"BŁĄD symulacji {name}: {e!r} - pomijam, do powtórzenia przy kolejnym uruchomieniu.")
+            continue
 
         failures = json.loads((out_dir / "meta.json").read_text(encoding="utf-8"))["failures"]
         if failures:

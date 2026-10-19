@@ -20,7 +20,7 @@ from config import DEFAULT_CONFIG
 WARMUP_MONTHS = 2
 
 # Okres strojenia - na nim wybierana jest najlepsza kombinacja parametrów.
-TUNING_START = "2024-04-15"
+TUNING_START = "2023-10-15"
 TUNING_END = "2024-10-14"
 
 # Okres oceny końcowej - tylko zwycięska kombinacja, rozłączny ze strojeniem.
