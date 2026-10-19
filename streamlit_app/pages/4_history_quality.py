@@ -10,7 +10,7 @@ from charts import (
     model_color_scale,
     padded_domain,
 )
-from db import last_n_evaluated_cutoff, supabase
+from db import fetch_all, last_n_evaluated_cutoff, supabase
 from theme import apply_theme
 
 apply_theme()
@@ -50,20 +50,24 @@ model_order = (
     models_df.groupby("model_type")["created_at"].min().sort_values().index.tolist()
 )
 
-pred_query = (
-    supabase.table("model_predictions")
-    .select("target_date, model_id, predicted_value, actual_value, error_value")
-    .eq("status", "evaluated")
-)
-if cutoff:
-    pred_query = pred_query.gte("target_date", cutoff)
-pred_resp = pred_query.order("target_date").execute()
+def _pred_query():
+    query = (
+        supabase.table("model_predictions")
+        .select("target_date, model_id, predicted_value, actual_value, error_value")
+        .eq("status", "evaluated")
+    )
+    if cutoff:
+        query = query.gte("target_date", cutoff)
+    return query.order("target_date").order("prediction_id")
 
-if not pred_resp.data:
+
+pred_rows = fetch_all(_pred_query)
+
+if not pred_rows:
     st.info("Brak jeszcze ocenionych predykcji w wybranym zakresie.")
     st.stop()
 
-df = pd.DataFrame(pred_resp.data)
+df = pd.DataFrame(pred_rows)
 df["target_date"] = pd.to_datetime(df["target_date"])
 df["model_type"] = df["model_id"].map(id_to_type)
 

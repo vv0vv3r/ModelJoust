@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 
 from charts import ACCENT_COLOR, CATEGORY_AXIS, GRID_STYLE, LABEL_STYLE, bar_y_domain, highlight_best_worst, model_color_scale
-from db import last_n_evaluated_cutoff, supabase
+from db import fetch_all, last_n_evaluated_cutoff, supabase
 from theme import apply_theme
 
 apply_theme()
@@ -32,13 +32,13 @@ if system_df_full.empty:
     st.stop()
 system_df_full["log_date"] = pd.to_datetime(system_df_full["log_date"])
 
-pred_resp = (
-    supabase.table("model_predictions")
+pred_rows = fetch_all(
+    lambda: supabase.table("model_predictions")
     .select("target_date, model_id, predicted_value, actual_value, error_value")
     .eq("status", "evaluated")
-    .execute()
+    .order("prediction_id")
 )
-pred_df_full = pd.DataFrame(pred_resp.data or [])
+pred_df_full = pd.DataFrame(pred_rows)
 pred_df_full["target_date"] = pd.to_datetime(pred_df_full["target_date"])
 pred_df_full["model_type"] = pred_df_full["model_id"].map(id_to_type)
 

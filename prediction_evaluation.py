@@ -17,19 +17,34 @@ def beats_baseline(mape_by_model: dict, challenger: str, baseline: str, margin: 
 def get_all_model_ids() -> dict:
     """Zwraca {model_id: model_type} dla WSZYSTKICH wersji w models_logs
     (nie tylko aktywnych) - potrzebne do poprawnego mapowania historycznych
-    predykcji sprzed retreningu przy liczeniu kroczącego MAPE."""
-    response = (
-        supabase.table("models_logs")
-        .select("id, model_type")
-        .execute()
-    )
-    if not response.data:
+    predykcji sprzed retreningu przy liczeniu kroczącego MAPE.
+
+    Stronicowanie przez .range() - Supabase zwraca najwyżej 1000 wierszy na
+    zapytanie; bez tego po 1000 wersjach modeli część z nich nie miałaby
+    typu i ich predykcje cicho wypadałyby z MAPE i Page-Hinkleya."""
+    page_size = 1000
+    rows = []
+    start = 0
+    while True:
+        response = (
+            supabase.table("models_logs")
+            .select("id, model_type")
+            .order("id")
+            .range(start, start + page_size - 1)
+            .execute()
+        )
+        rows.extend(response.data)
+        if len(response.data) < page_size:
+            break
+        start += page_size
+
+    if not rows:
         # Legalny stan startowy (pierwsze uruchomienie systemu, jeszcze
         # zero modeli w models_logs) - nie błąd. Nie ma żadnych predykcji do
         # zmapowania, więc reszta funkcji bezpiecznie przejdzie z pustym dict.
         print("Brak jakichkolwiek wpisów w models_logs - zakładam pierwsze uruchomienie systemu.")
         return {}
-    return {row["id"]: row["model_type"] for row in response.data}
+    return {row["id"]: row["model_type"] for row in rows}
 
 
 def evaluate_predictions_and_update_system_logs(today_str: str, config: dict):
