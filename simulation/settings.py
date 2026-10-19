@@ -7,7 +7,11 @@ Każda symulacja startuje od zera WARMUP_MONTHS przed okresem, który jest
 oceniany - rozbieg (pierwszy trening wszystkich modeli, zapełnienie okna
 kroczącego MAPE) nie wchodzi do wyników.
 """
+import simulation.sandbox  # noqa: F401  (config.py importuje db_client)
+
 import pandas as pd
+
+from config import DEFAULT_CONFIG
 
 WARMUP_MONTHS = 2
 
@@ -42,6 +46,17 @@ PARAM_CODES = {
 def simulation_start(period_start: str) -> str:
     """Pierwszy dzień symulacji = początek ocenianego okresu minus rozbieg."""
     return (pd.Timestamp(period_start) - pd.DateOffset(months=WARMUP_MONTHS)).strftime("%Y-%m-%d")
+
+
+def build_config(params: dict) -> dict:
+    """Pełna konfiguracja symulacji: DEFAULT_CONFIG z nadpisanymi
+    parametrami kombinacji."""
+    unknown = set(params) - set(DEFAULT_CONFIG)
+    if unknown:
+        raise ValueError(f"Nieznane parametry (brak w DEFAULT_CONFIG): {unknown}")
+    config = {key: value for key, (value, _description) in DEFAULT_CONFIG.items()}
+    config.update(params)
+    return config
 
 
 def folder_name(params: dict) -> str:

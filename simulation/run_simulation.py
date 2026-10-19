@@ -10,7 +10,7 @@ Wynik w simulation/results/<nazwa>/:
   models_logs.csv, model_predictions.csv, system_logs.csv,
   pipeline_config.csv - tabele jak w bazie, pełna historia działania,
   pipeline.log        - wszystko, co system wypisał,
-  meta.json           - parametry, okres, czas trwania, błędy dni.
+  meta.json           - parametry, okres, wersja kodu (commit), czas trwania, błędy dni.
 meta.json zapisywany jest jako ostatni - jego obecność oznacza, że
 symulacja doszła do końca.
 
@@ -21,6 +21,7 @@ Uruchomienie (z katalogu repo), np.:
 import argparse
 import contextlib
 import json
+import subprocess
 import sys
 import time
 import traceback
@@ -32,6 +33,7 @@ import pandas as pd
 
 import main_pipeline
 from config import DEFAULT_CONFIG
+from simulation.settings import build_config
 
 SIM_DIR = Path(__file__).resolve().parent
 MARKET_DATA_PATH = SIM_DIR / "data" / "market_data.csv"
@@ -55,16 +57,26 @@ def _ensure_market_data() -> None:
 def _seed_config(params: dict) -> dict:
     """pipeline_config = DEFAULT_CONFIG z nadpisanymi parametrami
     testowanej kombinacji."""
-    unknown = set(params) - set(DEFAULT_CONFIG)
-    if unknown:
-        raise ValueError(f"Nieznane parametry (brak w DEFAULT_CONFIG): {unknown}")
-    config = {key: value for key, (value, _description) in DEFAULT_CONFIG.items()}
-    config.update(params)
+    config = build_config(params)
     sandbox.fake_supabase.table("pipeline_config").insert([
         {"key": key, "value": value, "description": DEFAULT_CONFIG[key][1], "active": True}
         for key, value in config.items()
     ]).execute()
     return config
+
+
+def _code_version() -> dict:
+    """Commit, na którym uruchomiono symulację, i czy śledzone pliki miały
+    niezacommitowane zmiany - wyniki da się potem przypisać do wersji kodu."""
+    repo = SIM_DIR.parent
+    try:
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True,
+                                text=True, check=True).stdout.strip()
+        changed = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=repo,
+                                 capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return {"commit": None, "uncommitted_changes": None}
+    return {"commit": commit, "uncommitted_changes": bool(changed)}
 
 
 def run_simulation(name: str, start_date: str, end_date: str, params: dict | None = None) -> Path:
@@ -102,6 +114,7 @@ def run_simulation(name: str, start_date: str, end_date: str, params: dict | Non
         "end_date": end_date,
         "params": params,
         "config": config,
+        **_code_version(),
         "sim_days": len(sim_dates),
         "runtime_minutes": round((time.time() - t0) / 60, 2),
         "failures": failures,

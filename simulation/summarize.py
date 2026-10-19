@@ -11,14 +11,18 @@ powstaje dopiero po poznaniu ceny z D).
 
 Trafność kierunku liczona względem ostatniej znanej ceny w chwili
 prognozy, czyli prognozy modelu naiwnego z tego samego dnia: czy model
-dobrze wskazał, czy cena wzrośnie, czy spadnie.
+dobrze wskazał, czy cena wzrośnie, czy spadnie. Dni, w których prognoza
+równa się ostatniej cenie (np. aktywny model naiwny - "brak zdania" o
+kierunku), i dni bez zmiany ceny są pomijane.
 """
 import json
 from pathlib import Path
 
 import pandas as pd
 
-from simulation.settings import PARAM_GRID, TUNING_END, TUNING_START, folder_name
+from simulation.settings import (
+    PARAM_GRID, TUNING_END, TUNING_START, build_config, folder_name, simulation_start,
+)
 
 MODEL_TYPES = ["naive", "OLS", "lasso", "random_forest", "xgboost"]
 MODEL_CODES = {"naive": "n", "OLS": "o", "lasso": "l", "random_forest": "r", "xgboost": "x"}
@@ -56,14 +60,17 @@ def load_daily_predictions(folder: Path, period_start: str, period_end: str) -> 
     return daily
 
 
-def _metrics(predicted: pd.Series, actual: pd.Series, last_price: pd.Series) -> tuple[float, float]:
-    """(MAPE w %, trafność kierunku w %). Dni bez prognozy pomijane."""
+def _metrics(predicted: pd.Series, actual: pd.Series, last_price: pd.Series) -> tuple[float, float, int]:
+    """(MAPE w %, trafność kierunku w %, liczba dni bez zdania o kierunku).
+    Dni bez prognozy pomijane."""
     has_prediction = predicted.notna()
     predicted, actual, last_price = predicted[has_prediction], actual[has_prediction], last_price[has_prediction]
     ape = (predicted - actual).abs() / actual.abs()
-    moved = actual != last_price
+    no_opinion = predicted == last_price
+    counted = ~no_opinion & (actual != last_price)
     direction_hit = ((predicted - last_price) > 0) == ((actual - last_price) > 0)
-    return float(ape.mean() * 100), float(direction_hit[moved].mean() * 100)
+    direction = float(direction_hit[counted].mean() * 100) if counted.any() else float("nan")
+    return float(ape.mean() * 100), direction, int(no_opinion.sum())
 
 
 def summarize_run(folder: Path, period_start: str, period_end: str) -> dict:
@@ -73,9 +80,11 @@ def summarize_run(folder: Path, period_start: str, period_end: str) -> dict:
     summary = {"folder": folder.name, **meta["params"]}
 
     for column in ["system"] + MODEL_TYPES:
-        mape, direction = _metrics(daily[column], daily["actual"], daily["naive"])
+        mape, direction, no_opinion_days = _metrics(daily[column], daily["actual"], daily["naive"])
         summary[f"mape_{column}"] = round(mape, 4)
         summary[f"kierunek_{column}"] = round(direction, 2) if column != "naive" else None
+        if column == "system":
+            summary["dni_bez_kierunku_system"] = no_opinion_days
     summary["system_vs_naiwny_proc"] = round(
         (summary["mape_system"] - summary["mape_naive"]) / summary["mape_naive"] * 100, 2
     )
@@ -83,9 +92,14 @@ def summarize_run(folder: Path, period_start: str, period_end: str) -> dict:
     sequence = "".join(MODEL_CODES[m] for m in daily["active_model"])
     summary["zmiany_championa"] = sum(a != b for a, b in zip(sequence, sequence[1:]))
 
+    # Dzień retreningu = sesja po train_end_date (model trenuje na danych do
+    # poprzedniej sesji, bo cel to cena z kolejnego dnia).
     models_logs = pd.read_csv(folder / "models_logs.csv")
+    retrain_day = (
+        pd.to_datetime(models_logs["train_end_date"]) + pd.tseries.offsets.BDay(1)
+    ).dt.strftime("%Y-%m-%d")
     in_period = models_logs[
-        models_logs["train_end_date"].between(period_start, period_end)
+        retrain_day.between(period_start, period_end)
         & (models_logs["retrain_trigger"] != "init")
     ]
     triggers = in_period["retrain_trigger"].fillna("")
@@ -96,22 +110,38 @@ def summarize_run(folder: Path, period_start: str, period_end: str) -> dict:
     summary["dni_oceny"] = len(daily)
     summary["bledy_dni"] = len(meta["failures"])
     summary["czas_min"] = meta["runtime_minutes"]
+    summary["commit"] = (meta.get("commit") or "")[:7]
+    summary["niezacommitowane_zmiany"] = meta.get("uncommitted_changes")
     summary["sekwencja_championa"] = sequence
     return summary
 
 
+def grid_run_problem(folder: Path) -> str | None:
+    """None, jeśli folder to zakończona symulacja siatki zgodna z BIEŻĄCYMI
+    ustawieniami (nazwa wg folder_name, okres strojenia z rozbiegiem, pełna
+    konfiguracja). W przeciwnym razie powód - np. folder z poprzednich
+    ustawień albo nie z siatki (test, ocena końcowa)."""
+    meta_path = folder / "meta.json"
+    if not meta_path.exists():
+        return "brak meta.json (symulacja niezakończona)"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    params = meta["params"]
+    if set(params) != set(PARAM_GRID) or folder.name != folder_name(params):
+        return "nie jest folderem siatki"
+    if meta["start_date"] != simulation_start(TUNING_START) or meta["end_date"] != TUNING_END:
+        return f"inny okres ({meta['start_date']} -> {meta['end_date']})"
+    if meta["config"] != build_config(params):
+        return "inna konfiguracja parametrów spoza siatki"
+    return None
+
+
 def build_grid_summary(results_dir: Path) -> pd.DataFrame:
-    """Podsumowanie wszystkich ZAKOŃCZONYCH symulacji siatki (folder z
-    meta.json, nazwany dokładnie wg folder_name(params) - tak nazywa je
-    tylko run_grid.py), posortowane od najlepszego MAPE systemu."""
+    """Podsumowanie wszystkich zakończonych symulacji siatki zgodnych z
+    bieżącymi ustawieniami (grid_run_problem), posortowane od najlepszego
+    MAPE systemu."""
     rows = []
     for folder in sorted(results_dir.iterdir()):
-        meta_path = folder / "meta.json"
-        if not meta_path.exists():
-            continue
-        params = json.loads(meta_path.read_text(encoding="utf-8"))["params"]
-        if set(params) != set(PARAM_GRID) or folder.name != folder_name(params):
-            continue  # np. test albo ocena końcowa (inna nazwa folderu) - nie część siatki
-        rows.append(summarize_run(folder, TUNING_START, TUNING_END))
+        if folder.is_dir() and grid_run_problem(folder) is None:
+            rows.append(summarize_run(folder, TUNING_START, TUNING_END))
     df = pd.DataFrame(rows)
     return df.sort_values("mape_system").reset_index(drop=True) if not df.empty else df

@@ -11,8 +11,11 @@ table().select/insert/update/upsert/delete, filtry eq/neq/gt/gte/lt/lte/is_
 kolumny autonumerowane (GENERATED ALWAYS AS IDENTITY), wartości domyślne
 kolumn i ograniczenia unikalności z database/database_setup.sql.
 
-Każdy odczyt i zapis kopiuje dane (deepcopy) - tak jak prawdziwa baza, kod
-dostaje własną kopię i jej modyfikacja nie zmienia zawartości tabeli.
+Zapisywane dane przechodzą przez JSON tak jak w kliencie supabase-py
+(NaN albo typ spoza JSON, np. numpy.int64 czy Timestamp, daje błąd jak na
+produkcji), a odczyt zwraca kopię (deepcopy) - kod dostaje własne dane i
+ich modyfikacja nie zmienia zawartości tabeli. Odpowiedź ma najwyżej
+MAX_ROWS wierszy, jak domyślny limit PostgREST w Supabase.
 """
 import copy
 import json
@@ -61,6 +64,18 @@ SCHEMA = {
 
 # Tabele zapisywane do CSV po symulacji (raw_data to dane wejściowe, nie wynik).
 RESULT_TABLES = ["models_logs", "model_predictions", "system_logs", "pipeline_config"]
+
+
+# Domyślny limit wierszy odpowiedzi PostgREST w Supabase - zapytanie bez
+# stronicowania dostaje najwyżej tyle wierszy, także na produkcji.
+MAX_ROWS = 1000
+
+
+def _json_roundtrip(value):
+    """Dane wysyłane do bazy - jak klient supabase-py (httpx serializuje z
+    allow_nan=False): NaN/inf albo typ spoza JSON rzuca błąd, a klucze
+    słowników stają się tekstem."""
+    return json.loads(json.dumps(value, allow_nan=False))
 
 
 class FakeResponse:
@@ -117,33 +132,35 @@ class FakeQuery:
         self._negate_next = True
         return self
 
-    def _add_filter(self, column, check):
+    def _add_filter(self, column, check, null_aware: bool = False):
+        # null_aware=False: jak w SQL porównanie z NULL nigdy nie jest
+        # prawdziwe - także po zaprzeczeniu (NOT (NULL = x) to wciąż NULL).
         negate, self._negate_next = self._negate_next, False
-        self._filters.append((column, check, negate))
+        self._filters.append((column, check, negate, null_aware))
         return self
 
     def eq(self, column, value):
-        return self._add_filter(column, lambda v: v is not None and v == value)
+        return self._add_filter(column, lambda v: v == value)
 
     def neq(self, column, value):
-        return self._add_filter(column, lambda v: v is not None and v != value)
+        return self._add_filter(column, lambda v: v != value)
 
     def gt(self, column, value):
-        return self._add_filter(column, lambda v: v is not None and v > value)
+        return self._add_filter(column, lambda v: v > value)
 
     def gte(self, column, value):
-        return self._add_filter(column, lambda v: v is not None and v >= value)
+        return self._add_filter(column, lambda v: v >= value)
 
     def lt(self, column, value):
-        return self._add_filter(column, lambda v: v is not None and v < value)
+        return self._add_filter(column, lambda v: v < value)
 
     def lte(self, column, value):
-        return self._add_filter(column, lambda v: v is not None and v <= value)
+        return self._add_filter(column, lambda v: v <= value)
 
     def is_(self, column, value):
         if value not in ("null", None):
             raise NotImplementedError(f"is_() obsługuje tylko 'null', dostał {value!r}")
-        return self._add_filter(column, lambda v: v is None)
+        return self._add_filter(column, lambda v: v is None, null_aware=True)
 
     # --- sortowanie i stronicowanie ---
     def order(self, column, desc: bool = False):
@@ -160,8 +177,11 @@ class FakeQuery:
 
     # --- wykonanie ---
     def _matches(self, row: dict) -> bool:
-        for column, check, negate in self._filters:
-            if check(row.get(column)) == negate:
+        for column, check, negate, null_aware in self._filters:
+            value = row.get(column)
+            if value is None and not null_aware:
+                return False
+            if check(value) == negate:
                 return False
         return True
 
@@ -194,6 +214,7 @@ class FakeQuery:
             result = result[start:end + 1]
         if self._limit is not None:
             result = result[:self._limit]
+        result = result[:MAX_ROWS]
         if self._columns is not None:
             result = [{c: row.get(c) for c in self._columns} for row in result]
         return copy.deepcopy(result)
@@ -201,12 +222,13 @@ class FakeQuery:
     def _run_update(self, rows: list[dict]) -> list[dict]:
         if not self._filters:
             raise ValueError("update() bez filtra - prawdziwa baza też by tego nie przepuściła.")
+        new_values = _json_roundtrip(self._payload)
         updated = []
         for row in rows:
             if self._matches(row):
-                candidate = {**row, **copy.deepcopy(self._payload)}
+                candidate = {**row, **new_values}
                 self._db._check_unique(self._table, candidate, ignore=row)
-                row.update(copy.deepcopy(self._payload))
+                row.update(copy.deepcopy(new_values))
                 updated.append(copy.deepcopy(row))
         return updated
 
@@ -256,7 +278,7 @@ class FakeSupabase:
         identity = schema["identity"]
         if identity and identity in payload:
             raise ValueError(f"Kolumna '{identity}' jest GENERATED ALWAYS - nie wolno jej podawać.")
-        row = {**copy.deepcopy(schema["columns"]), **copy.deepcopy(payload)}
+        row = {**copy.deepcopy(schema["columns"]), **_json_roundtrip(payload)}
         if identity:
             row[identity] = self._next_id[table]
             self._next_id[table] += 1
@@ -298,7 +320,7 @@ class FakeSupabase:
             if existing is None:
                 result.extend(self._insert(table, item))
             else:
-                existing.update(copy.deepcopy(item))
+                existing.update(_json_roundtrip(item))
                 result.append(copy.deepcopy(existing))
         return result
 
