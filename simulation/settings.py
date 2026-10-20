@@ -34,15 +34,15 @@ EVALUATION_END = "2026-10-15"
 # od początku były częścią nazwy folderu - dopisanie im później kolejnej
 # wartości policzy tylko nowe kombinacje, a dotychczasowe zostaną użyte.
 PARAM_GRID = {
-    "training_window_years": [0.5, 1, 2],
+    "training_window_years": [0.5, 1, 1.5, 2],
     "active_model_streak_days": [2, 3],
     "active_model_margin": [0.0025, 0.005],
     "concept_drift_lambda": [0.015, 0.03],
-    "rolling_mape_window_days": [14, 29],
-    "data_drift_z_threshold": [3.0, 4.0],
+    "rolling_mape_window_days": [14, 21, 29],
+    "data_drift_z_threshold": [2.5, 3.0, 4.0],
     "data_drift_pct_threshold": [0.2],
     "concept_drift_delta": [0.0005],
-    "tree_cumulative_importance_threshold": [0.9],
+    "tree_cumulative_importance_threshold": [0.8, 0.9],
 }
 
 # Skróty do nazw folderów wyników, np. y0.5_s2_m0.0025_l0.015_w14_z3_p0.2_d0.0005_t0.9.
