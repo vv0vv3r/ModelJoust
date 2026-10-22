@@ -10,7 +10,24 @@ from theme import apply_theme
 apply_theme()
 
 st.title("Porównanie modeli")
-st.caption("Który model jest teraz najlepszy (przez ostatnie 30 dni)")
+
+# Okno wyboru modelu aktywnego czytane z konfiguracji (zmienialne w panelu
+# admina) - metryki niżej to osobny, stały widok 30 dni i nie muszą
+# wskazywać tego samego modelu co wybór systemu.
+window_resp = (
+    supabase.table("pipeline_config")
+    .select("value")
+    .eq("key", "rolling_mape_window_days")
+    .eq("active", True)
+    .execute()
+)
+window_days = window_resp.data[0]["value"] if window_resp.data else None
+selection_text = (
+    f"model aktywny wybierany wg MAPE z ostatnich {int(window_days)} dni"
+    if window_days is not None
+    else "model aktywny wybierany wg kroczącego MAPE"
+)
+st.caption(f"Metryki modeli z ostatnich 30 dni · {selection_text}")
 
 # --- Dane ---
 models_resp = supabase.table("models_logs").select(
