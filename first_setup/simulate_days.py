@@ -7,9 +7,28 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import main_pipeline
 from main_pipeline import main
 
 DAYS_TO_SIMULATE = 100
+
+# Komentarze LLM tylko dla prognoz z ostatniego symulowanego dnia (te widać
+# w aplikacji na stronie "Dziś") - dla wcześniejszych dni pole zostaje puste.
+# Setki wywołań Groq na raz wyczerpują limit API, a komentarze do
+# historycznych prognoz nie są potrzebne.
+LLM_ONLY_LAST_DAY = True
+
+_build_llm_comment = main_pipeline.build_llm_comment
+_llm_enabled = True
+
+
+def _llm_comment_if_enabled(model_type, shap_values, predicted_value):
+    if _llm_enabled:
+        return _build_llm_comment(model_type, shap_values, predicted_value)
+    return None
+
+
+main_pipeline.build_llm_comment = _llm_comment_if_enabled
 
 
 def run_simulation():
@@ -23,6 +42,7 @@ def run_simulation():
     dzisiejsza sesja może jeszcze trwać, a jej cenę zamknięcia i tak
     wieczorem zapisze dzienny przebieg z GitHub Actions.
     """
+    global _llm_enabled
     end_date = pd.Timestamp.now(tz="America/New_York").normalize().tz_localize(None) - pd.tseries.offsets.BDay(1)
     sim_dates = pd.bdate_range(end=end_date, periods=DAYS_TO_SIMULATE)
 
@@ -30,6 +50,7 @@ def run_simulation():
 
     failures = []
     for i, date in enumerate(sim_dates, start=1):
+        _llm_enabled = not LLM_ONLY_LAST_DAY or i == len(sim_dates)
         print(f"\n{'=' * 80}\nDzień {i}/{len(sim_dates)}: {date.date()}\n{'=' * 80}")
         try:
             main(as_of_date=date)
