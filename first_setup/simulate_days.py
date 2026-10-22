@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from main_pipeline import main
 
-DAYS_TO_SIMULATE = 200
+DAYS_TO_SIMULATE = 100
 
 
 def run_simulation():
@@ -18,8 +18,12 @@ def run_simulation():
     ostatnich dni roboczych - test end-to-end całego pipeline'u na realnych
     danych historycznych. Błąd w jednym dniu nie przerywa symulacji,
     tylko jest odnotowywany i podsumowywany na końcu.
+
+    Ostatni symulowany dzień = poprzedni dzień roboczy (wg czasu New York):
+    dzisiejsza sesja może jeszcze trwać, a jej cenę zamknięcia i tak
+    wieczorem zapisze dzienny przebieg z GitHub Actions.
     """
-    end_date = pd.Timestamp.now(tz="America/New_York").normalize().tz_localize(None)
+    end_date = pd.Timestamp.now(tz="America/New_York").normalize().tz_localize(None) - pd.tseries.offsets.BDay(1)
     sim_dates = pd.bdate_range(end=end_date, periods=DAYS_TO_SIMULATE)
 
     print(f"Symulacja {len(sim_dates)} dni roboczych: {sim_dates[0].date()} -> {sim_dates[-1].date()}")

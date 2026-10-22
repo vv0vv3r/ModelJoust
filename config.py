@@ -14,10 +14,10 @@ DEFAULT_CONFIG = {
         0.03, "Page-Hinkley lambda_threshold (ułamek ceny, na błędzie względem modelu naiwnego)"
     ),
     "active_model_margin": (0.005, "Margines względnej poprawy MAPE do przełączenia"),
-    "active_model_streak_days": (2, "Ile dni z rzędu trzeba pobijać aktywny model"),
-    "rolling_mape_window_days": (29, "Okno kroczącego MAPE (dni)"),
+    "active_model_streak_days": (3, "Ile dni z rzędu trzeba pobijać aktywny model"),
+    "rolling_mape_window_days": (14, "Okno kroczącego MAPE (dni)"),
     "training_window_years": (
-        3, "Długość okna historii używanej do treningu OLS/Lasso/RF/XGBoost (lata)"
+        1, "Długość okna historii używanej do treningu OLS/Lasso/RF/XGBoost (lata)"
     ),
     "ols_p_value_threshold": (0.05, "Próg eliminacji wstecznej OLS"),
     "ols_vif_threshold": (10.0, "Próg VIF"),

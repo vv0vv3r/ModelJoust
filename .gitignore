@@ -170,3 +170,6 @@ sensitivity_analysis/
 # Symulacje lokalne - dane wejściowe z yfinance i wyniki (kod w simulation/ zostaje w repo)
 simulation/data/
 simulation/results/
+
+# Lokalne analizy do pracy (wybór konfiguracji, ocena końcowa) - nie publikować
+analizy/
